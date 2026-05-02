@@ -1,0 +1,5 @@
+location       = "eastus"
+project        = "opella"
+environment    = "dev"
+admin_username = "azureadmin"
+admin_password = "YOUR_SECURE_PASSWORD_HERE"
