@@ -1,126 +1,141 @@
-# Opella Infrastructure — Terraform on Azure
+# Opella Infrastructure - Terraform on Azure
 
-Reusable, multi-environment Azure infrastructure provisioned with Terraform and deployed via GitHub Actions.
+Multi-environment Azure infrastructure built with reusable Terraform modules and deployed via GitHub Actions.
 
-## Architecture
+---
 
-    opella-infra/
-    ├── modules/
-    │   └── vnet/              # Reusable VNET module
-    │       ├── main.tf
-    │       ├── variables.tf
-    │       ├── outputs.tf
-    │       └── README.md
-    ├── environments/
-    │   ├── dev/               # Development (eastus)
-    │   │   ├── main.tf
-    │   │   ├── variables.tf
-    │   │   ├── outputs.tf
-    │   │   ├── backend.tf
-    │   │   └── terraform.tfvars
-    │   └── prod/              # Production (westeurope)
-    │       ├── main.tf
-    │       ├── variables.tf
-    │       ├── outputs.tf
-    │       ├── backend.tf
-    │       └── terraform.tfvars
-    ├── .github/
-    │   └── workflows/
-    │       └── terraform.yml  # CI/CD pipeline
-    ├── .gitignore
-    └── README.md
+## Repository Structure
+opella-infra/
+├── modules/
+│   └── vnet/               # Reusable VNET module (shared across environments)
+│       ├── main.tf
+│       ├── variables.tf
+│       ├── outputs.tf
+│       └── README.md       # Auto-generated via terraform-docs
+├── environments/
+│   ├── dev/                # eastus
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   ├── backend.tf
+│   │   └── terraform.tfvars
+│   └── prod/               # westeurope
+│       ├── main.tf
+│       ├── variables.tf
+│       ├── outputs.tf
+│       ├── backend.tf
+│       └── terraform.tfvars
+├── .github/workflows/
+│   └── terraform.yml
+├── .pre-commit-config.yaml
+└── README.md
 
-## Environments
+---
 
-| Environment | Region     | VNET CIDR   | VM Size      |
-|-------------|------------|-------------|--------------|
-| dev         | eastus     | 10.0.0.0/16 | Standard_B1s |
-| prod        | westeurope | 10.1.0.0/16 | Standard_B1s |
+## What Gets Deployed
 
-## Resources per environment
+Both environments are identical in structure - region, CIDR, and naming are the only differences, driven by `terraform.tfvars` per environment.
 
-| Resource               | Purpose                              |
-|------------------------|--------------------------------------|
-| Resource Group         | Logical container for all resources  |
-| Virtual Network        | Isolated network via reusable module |
-| Subnets (app, db)      | Network segmentation                 |
-| Network Security Group | Deny-all inbound baseline per subnet |
-| Storage Account + Blob | App data storage (private container) |
-| Windows VM             | Compute for dev/prod workloads       |
+### dev - eastus
 
-## Release Lifecycle
+| Resource | Name | Detail |
+|---|---|---|
+| Resource Group | `rg-opella-dev-eastus` | Contains all dev resources |
+| Virtual Network | `vnet-opella-dev-eastus` | `10.0.0.0/16`, via reusable module |
+| Subnet - app | `subnet-app-opella-dev-eastus` | `10.0.1.0/24` |
+| Subnet - db | `subnet-db-opella-dev-eastus` | `10.0.2.0/24` |
+| NSG - app | `nsg-app-opella-dev-eastus` | Allow 443 inbound, deny all else |
+| NSG - db | `nsg-db-opella-dev-eastus` | Allow 1433 from app subnet only |
+| Storage Account | `stopelladev<random>` | Private blob container, public access disabled |
+| Windows VM | `vm-opella-dev-eastus` | Standard_B1s, app subnet, no public IP |
 
-    Push / PR opened
-         │
-         ▼
-    lint-and-validate  ←─── terraform fmt + validate (both envs)
-         │
-         ▼
-    plan-dev + plan-prod  ←─── terraform plan (artifacts saved)
-         │
-         ▼
-    apply-dev  ←─── auto on merge to main
-         │
-         ▼
-    apply-prod  ←─── manual approval required (GitHub Environment protection)
+### prod - westeurope
 
-## Why Resource Groups over Subscriptions for environments?
+| Resource | Name | Detail |
+|---|---|---|
+| Resource Group | `rg-opella-prod-westeurope` | Contains all prod resources |
+| Virtual Network | `vnet-opella-prod-westeurope` | `10.1.0.0/16`, via reusable module |
+| Subnet - app | `subnet-app-opella-prod-westeurope` | `10.1.1.0/24` |
+| Subnet - db | `subnet-db-opella-prod-westeurope` | `10.1.2.0/24` |
+| NSG - app | `nsg-app-opella-prod-westeurope` | Allow 443 inbound, deny all else |
+| NSG - db | `nsg-db-opella-prod-westeurope` | Allow 1433 from app subnet only |
+| Storage Account | `stopellaprod<random>` | Private blob container, public access disabled |
+| Windows VM | `vm-opella-prod-westeurope` | Standard_B1s, app subnet, no public IP |
 
-For this project scale, Resource Groups per environment offer:
-- Simpler RBAC — grant access at RG level per team
-- Cost tracking via tags per environment
-- Easy teardown — delete RG removes everything in that env
-- Subscriptions are better suited for enterprise billing isolation or policy boundaries across large teams
+### Outputs (per environment)
 
-## Naming Convention
+| Output | Why it's exposed |
+|---|---|
+| `vnet_id` | Needed by peering, Private Endpoints, and App Gateway configs |
+| `subnet_ids` | Consumed by any resource that needs to attach to a specific subnet |
+| `vm_name` | Useful for referencing in scripts, Bastion sessions, and monitoring alerts |
+| `storage_account_name` | App config and deployment scripts need this at runtime |
+| `resource_group_name` | Required as a reference by any post-deploy tooling or pipelines |
 
-All resources follow this pattern:
+---
 
-    {prefix}-{project}-{environment}-{region}-{resource-type}
+## VNET Module
 
-Example: `vnet-opella-dev-eastus`
+Reusable with no hardcoded values - every environment-specific value is an input.
 
-## Tags enforced on all resources
+**Inputs:** `vnet_cidr`, `location`, `subnet_definitions` (map), `tags`, `enable_ddos_protection` (default: false - Standard costs ~$2,944/month, not justified here)
 
-| Tag         | Value              |
-|-------------|--------------------|
-| Environment | dev / prod         |
-| Project     | opella             |
-| ManagedBy   | Terraform          |
-| Owner       | DevOps             |
+**Outputs:** `vnet_id`, `vnet_name`, `subnet_ids` (name-to-ID map). A map avoids coupling callers to subnet ordering - any downstream resource can reference `subnet_ids["app"]` without caring how many subnets exist.
 
-## Remote State
+**Docs:** Auto-generated via terraform-docs on every commit using a pre-commit hook - no manual updates needed.
 
-Terraform state is stored remotely in Azure Blob Storage:
+**Testing:** Out of scope for a 2-4 hour challenge. In production I'd use Terratest - apply, assert VNET CIDR and subnet count, destroy.
 
-| Environment | Storage Account   | Container |
-|-------------|-------------------|-----------|
-| dev         | opellatfstate9211 | dev       |
-| prod        | opellatfstate9211 | prod      |
+---
 
-## Code Quality Tools
+## CI/CD Pipeline
+PR opened
 
-| Tool            | Purpose                              |
-|-----------------|--------------------------------------|
-| terraform fmt   | Auto-format all .tf files            |
-| terraform validate | Syntax and config validation      |
-| tflint          | Linting for Terraform best practices |
-| tfsec           | Security scanning of IaC             |
-| pre-commit      | Runs all checks before every commit  |
+terraform fmt -check
+terraform validate
+tflint + tfsec
+terraform plan (dev + prod) - saved as Actions artifact
 
-## Prerequisites
+Merge to main
 
-- Terraform >= 1.3.0
-- Azure CLI >= 2.83.0
-- GitHub Actions secrets configured (see below)
+Auto-apply dev
+Manual approval gate
+Apply prod
 
-## GitHub Secrets Required
 
-| Secret              | Description                    |
-|---------------------|--------------------------------|
-| ARM_CLIENT_ID       | Service Principal client ID    |
-| ARM_CLIENT_SECRET   | Service Principal secret       |
-| ARM_SUBSCRIPTION_ID | Azure subscription ID          |
-| ARM_TENANT_ID       | Azure tenant ID                |
-| DEV_VM_PASSWORD     | Admin password for dev VM      |
-| PROD_VM_PASSWORD    | Admin password for prod VM     |
+Plan outputs are under the **Actions** tab - download `terraform-plan-dev` or `terraform-plan-prod` from the latest run.
+
+---
+
+## Design Decisions
+
+**Resource Groups over Subscriptions** - RBAC is simpler at RG scope, tags flow to all child resources for cost tracking, and `terraform destroy` cleans everything atomically. Subscriptions make sense at enterprise scale when you need billing separation or strict policy isolation - unnecessary here.
+
+**Naming:** `{resource}-{project}-{env}-{region}` e.g. `vnet-opella-dev-eastus`
+
+**Tag enforcement:** Every resource gets `Environment`, `Project`, `ManagedBy`, `Owner`. Enforced two ways - Terraform variable validation fails the plan if a tag is missing, and an Azure Policy audit rule catches anything created outside Terraform.
+
+**Auth:** Service Principal + GitHub Secrets for this challenge. Production would use Workload Identity Federation (OIDC) - no long-lived secrets.
+
+**Remote state:** Azure Blob Storage, one container per environment. State locking via native blob lease - no extra infrastructure needed.
+
+| Environment | Storage Account | Container |
+|---|---|---|
+| dev | `opellatfstate9211` | `dev` |
+| prod | `opellatfstate9211` | `prod` |
+
+---
+
+## Code Quality
+
+`terraform fmt` + `terraform validate` + `tflint` + `tfsec` + `pre-commit` hooks. All checks run on every PR and block merge on failure.
+
+---
+
+## GitHub Secrets
+
+The following secrets are configured for Service Principal authentication, used in this challenge due to time constraints and Azure free tier limitations.
+
+`ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_SUBSCRIPTION_ID`, `ARM_TENANT_ID`, `DEV_VM_PASSWORD`, `PROD_VM_PASSWORD`
+
+In production, `ARM_CLIENT_ID` and `ARM_CLIENT_SECRET` would be replaced with OIDC-based Workload Identity Federation - no long-lived secrets stored in GitHub, tokens are short-lived and scoped per workflow run.
