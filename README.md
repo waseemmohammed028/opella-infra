@@ -5,6 +5,8 @@ Multi-environment Azure infrastructure built with reusable Terraform modules and
 ---
 
 ## Repository Structure
+
+```
 opella-infra/
 ├── modules/
 │   └── vnet/               # Reusable VNET module (shared across environments)
@@ -29,6 +31,7 @@ opella-infra/
 │   └── terraform.yml
 ├── .pre-commit-config.yaml
 └── README.md
+```
 
 ---
 
@@ -89,19 +92,19 @@ Reusable with no hardcoded values - every environment-specific value is an input
 ---
 
 ## CI/CD Pipeline
-PR opened
 
-terraform fmt -check
-terraform validate
-tflint + tfsec
-terraform plan (dev + prod) - saved as Actions artifact
+```
+PR opened
+  - terraform fmt -check
+  - terraform validate
+  - tflint + tfsec
+  - terraform plan (dev + prod) - saved as Actions artifact
 
 Merge to main
-
-Auto-apply dev
-Manual approval gate
-Apply prod
-
+  - Auto-apply dev
+  - Manual approval gate
+  - Apply prod
+```
 
 Plan outputs are under the **Actions** tab - download `terraform-plan-dev` or `terraform-plan-prod` from the latest run.
 
